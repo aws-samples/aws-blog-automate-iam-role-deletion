@@ -5,7 +5,9 @@ Proactively detecting and responding to unused IAM roles will help you prevent u
 
 ## **Solution architecture**
 
-[Image: checkUnusedIAMRoleSolution(2).png]The architecture diagram above demonstrate the automation workflow. There are two option to run this solution: in a single AWS Account belongs to an organization/OU, or in every member accounts belong to an organization or an organization unit.
+![Architecture Diagram](/images/checkUnusedIAMRoleSolution.png)
+
+The architecture diagram above demonstrate the automation workflow. There are two option to run this solution: in a single AWS Account belongs to an organization/OU, or in every member accounts belong to an organization or an organization unit.
 
 ## Walkthrough: Deploy the solution
 
@@ -21,8 +23,7 @@ Proactively detecting and responding to unused IAM roles will help you prevent u
 ### Deploy the solution for a target AWS Account using AWS Console
 
 From the home region of your Security Hub in Security account, , deploy this CloudFormation template (link to template solution_scope_account.yml on github)
-[Image: image.png]
-
+![State Machine Workflow](/images/statemachine.png)
 1. On **Specify stack details**,  provide a unique **Stack name**
 2. For **AccountId**, provide the AWS Account Id of target account 
 3. For **Frequency**, specify how often the automation will be triggered (number of days). For example, if you specify 2 days, the automation will be triggered 2 days after this solution is provisioned. To test this solution without waiting for this schedule, scroll down to **“Test this solution”**
