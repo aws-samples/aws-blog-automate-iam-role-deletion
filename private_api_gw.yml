@@ -1,0 +1,399 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Private RestApi captures owner response"
+
+Parameters:
+  NameOfSolution:
+    Type: String
+    Default: check-unused-IAM-role
+    Description: The name of the solution - used for naming of created resources
+
+Resources:
+  ## VPC
+  PubPrivateVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        -
+          Key: "Name"
+          Value: !Ref 'NameOfSolution'
+  ## SUBNETS     
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PubPrivateVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: false
+      Tags:
+        -
+          Key: "Name"
+          Value: !Ref 'NameOfSolution'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PubPrivateVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      MapPublicIpOnLaunch: false
+      Tags:
+        -
+          Key: "Name"
+          Value: !Ref 'NameOfSolution'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PubPrivateVPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: false 
+      Tags:
+        -
+          Key: "Name"
+          Value: !Ref 'NameOfSolution'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PubPrivateVPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      MapPublicIpOnLaunch: false
+      Tags:
+        -
+          Key: "Name"
+          Value: !Ref 'NameOfSolution'
+
+ ## INTERNET GATEWAY
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        -
+          Key: "Name"
+          Value: !Ref 'NameOfSolution'
+
+  GatewayToInternet:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref PubPrivateVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  ## PUBLIC ROUTING
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PubPrivateVPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+ 
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+ 
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+ 
+  ## NAT GATEWAY
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: NatPublicIP
+    Properties: 
+      SubnetId: !Ref PublicSubnet1
+      AllocationId: !GetAtt NatPublicIP.AllocationId
+
+  ## ELASTIC IP
+  NatPublicIP:
+    Type: AWS::EC2::EIP
+    DependsOn: PubPrivateVPC
+    Properties:
+      Domain: vpc
+ 
+  ## PRIVATE ROUTING
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PubPrivateVPC
+  
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      NatGatewayId: !Ref NatGateway
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+ 
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+ 
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  privateApiVpceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: SG for VPC endpoint 
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: '-1'
+      SecurityGroupIngress:
+        - CidrIp: !GetAtt 
+            - PubPrivateVPC
+            - CidrBlock
+          Description: !Join 
+            - ''
+            - - 'from '
+              - !GetAtt 
+                - PubPrivateVPC
+                - CidrBlock
+              - ':443'
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+      VpcId: !Ref PubPrivateVPC
+
+  privateApiVpcEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      ServiceName: !Join 
+        - ''
+        - - com.amazonaws.
+          - !Ref 'AWS::Region'
+          - .execute-api
+      VpcId: !Ref PubPrivateVPC
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !GetAtt 
+          - privateApiVpceSecurityGroup
+          - GroupId
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      VpcEndpointType: Interface
+# End of VPC creation
+
+# Begin API Gateway Resources
+
+  ExecutionApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      EndpointConfiguration:
+        Types:
+          - PRIVATE
+        VpcEndpointIds:
+          - !Ref privateApiVpcEndpoint
+      Name: !Sub "${AWS::StackName}-ApprovalEndpoint"
+      Description: "HTTP Endpoint to capture approval from email owner backed by API Gateway and StepFunction"
+      FailOnWarnings: true
+      Policy:
+        Statement:
+          - Action: 'execute-api:Invoke'
+            Effect: Allow
+            Principal: '*'
+            Resource: 'execute-api:/*'
+          - Action: 'execute-api:Invoke'
+            Condition:
+              StringNotEquals:
+                'aws:SourceVpce': !Ref privateApiVpcEndpoint
+            Effect: Deny
+            Principal: '*'
+            Resource: 'execute-api:/*'
+        Version: 2012-10-17
+
+  ExecutionResourceDeny:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ExecutionApi
+      ParentId: !GetAtt "ExecutionApi.RootResourceId"
+      PathPart: deny
+
+  ApiGatewayStepFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: invokeStateMachine
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "states:StartExecution"
+                  - "states:SendTaskSuccess"
+                  - "states:SendTaskFailure"
+                Resource: 
+                  - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${NameOfSolution}OnwerApprovalStateMachine" 
+        - PolicyName: apigwpushlogs
+          PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "logs:CreateLogGroup"
+                    - "logs:CreateLogStream"
+                    - "logs:DescribeLogGroups"
+                    - "logs:DescribeLogStreams"
+                    - "logs:PutLogEvents"
+                    - "logs:GetLogEvents"
+                    - "logs:FilterLogEvents"
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:logs:*:*:*"
+
+
+  ExecutionMethodDeny:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      RequestParameters: 
+        method.request.querystring.taskToken: true
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Credentials: !GetAtt "ApiGatewayStepFunctionRole.Arn"
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:states:action/SendTaskFailure"
+        IntegrationResponses:
+          - StatusCode: 200
+        RequestTemplates:
+          application/json: | 
+              {
+                 "cause": "Reject link was clicked.",
+                 "error": "Rejected",
+                 "taskToken": "$input.params('taskToken')"
+              }
+      ResourceId: !Ref ExecutionResourceDeny
+      RestApiId: !Ref ExecutionApi
+      MethodResponses:
+        - StatusCode: 200
+
+  ExecutionResourceApprove:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ExecutionApi
+      ParentId: !GetAtt "ExecutionApi.RootResourceId"
+      PathPart: approve
+
+  ExecutionMethodApprove:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      RequestParameters: 
+        method.request.querystring.taskToken: true
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt "ApiGatewayStepFunctionRole.Arn"
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:states:action/SendTaskSuccess"
+        IntegrationResponses:
+          - StatusCode: 200
+
+        RequestTemplates:
+          application/json: | 
+              {
+              "output": "\"Approve link was clicked.\"",
+              "taskToken": "$input.params('taskToken')"
+              }
+      ResourceId: !Ref ExecutionResourceApprove
+      RestApiId: !Ref ExecutionApi
+      MethodResponses:
+        - StatusCode: 200
+
+  ApiGatewayAccount:
+    Type: 'AWS::ApiGateway::Account'
+    Properties:
+      CloudWatchRoleArn: !GetAtt "ApiGatewayCloudWatchLogsRole.Arn"
+    DependsOn:
+      - ExecutionApi
+
+  ApiGatewayCloudWatchLogsRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: ApiGatewayLogsPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:DescribeLogGroups"
+                  - "logs:DescribeLogStreams"
+                  - "logs:PutLogEvents"
+                  - "logs:GetLogEvents"
+                  - "logs:FilterLogEvents"
+                Resource: 
+                  - !Sub "arn:${AWS::Partition}:logs:*:*:*"
+
+  ExecutionApiStage:
+    DependsOn:
+      - ApiGatewayAccount
+    Type: 'AWS::ApiGateway::Stage'
+    Properties:
+      DeploymentId: !Ref ApiDeployment
+      MethodSettings:
+        - DataTraceEnabled: false
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          ResourcePath: /*
+      RestApiId: !Ref ExecutionApi
+      StageName: respond
+
+  ApiDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - ExecutionMethodApprove
+      - ExecutionMethodDeny
+    Properties:
+      RestApiId: !Ref ExecutionApi
+
+  # End API Gateway Resources
+Outputs:
+  ApiGatewayInvokeURL:
+    Value: !Sub "https://${ExecutionApi}.execute-api.${AWS::Region}.amazonaws.com/${ExecutionApiStage}"
+  VPCEndpointID:
+    Description: The VPC endpoint ID to use for your private API.
+    Value: !Ref privateApiVpcEndpoint

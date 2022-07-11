@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Retrieve last used information for IAM roles and perform neccessary checks"
+
+Parameters:
+
+  Frequency:
+    Description: How often  (in days) the automation should run 
+    Type: Number
+    Default: 30
+    MaxValue: 365
+
+  NameOfSolution:
+    Type: String
+    Default: check-unused-IAM-role
+    Description: The name of the solution 
+
+  StateMachineHumanApprovalArn:
+    Type: String
+    Description: StepFunction state machine for approval workflow
+
+  RolePatternAllowedlist:
+    Description: Pipe separated whitelist of role pathnames using simple pathname matching
+    Type: String
+    Default: ''
+    AllowedPattern: '[-a-zA-Z0-9+=,.@_/|*]+|^$'
+
+  MaxDaysForLastUsed:
+      Description: Checks the number of days allowed for a role to not be used before being non-compliant
+      Type: Number
+      Default: 60
+      MaxValue: 365
+
+  AccountId:
+    Type: String
+    Description: AWS Account ID only if scope Account is choosen
+    AllowedPattern: ^[0-9]{12}$
+
+  CrossAccountRole: 
+    Type: String
+    Description: Role name for cross account role
+
+  DefaultEmail:
+    Type: String
+    Description: Default email address of IT Security Team to notified unused IAM Role if Owner email isn't available from tag
+
+Resources:
+
+  SecurityCustomEventBus: 
+    Type: AWS::Events::EventBus
+    Properties: 
+        Name: !Sub "${NameOfSolution}SecurityCustomEventBus"
+
+  ScheduledRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "Periodically trigger Lambda function to start solution CheckUnusedIAMRole"
+      ScheduleExpression: !Sub "rate(${Frequency} days)" #invoked every Frequency 
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: !GetAtt LambdaCheckIAMRole.Arn
+          Id: "GetMembersAccounts"
+
+  PermissionInvokeLambdaGetAccount: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !GetAtt LambdaCheckIAMRole.Arn 
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt ScheduledRule.Arn
+
+  LambdaCheckIAMRole:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: "Check for unused IAM roles in each account in organizations "
+      FunctionName: !Sub "${NameOfSolution}-LambdaCheckIAMRole"
+      Handler: check_iam_role.lambda_handler
+      Environment:
+        Variables:
+          member_account: !Ref AccountId
+          role_allowed_list: !Ref RolePatternAllowedlist
+          default_email: !Ref DefaultEmail
+          max_days_for_last_used: !Ref MaxDaysForLastUsed
+          cross_account_role: !Ref CrossAccountRole
+          state_machine_arn: !Ref StateMachineHumanApprovalArn
+      MemorySize: 512
+      Role: !GetAtt LambdaCheckIAMRoleExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 600
+      Code: ./lambda      
+    
+  LambdaCheckIAMRoleExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${NameOfSolution}-LambdaCheckIAMRoleExecutionRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: !Sub '${NameOfSolution}-LambdaCheckIAMRoleExecutionPolicy'
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sts:assumeRole
+              Resource: !Sub "arn:aws:iam::${AccountId}:role/${CrossAccountRole}" #need to scope down
+            - Effect: Allow
+              Action:
+                - securityhub:BatchImportFindings
+                - securityhub:BatchUpdateFindings 
+                - securityhub:GetFindings
+              Resource: 
+                - !Sub 'arn:${AWS::Partition}:securityhub:${AWS::Region}:${AWS::AccountId}:hub/default'
+                - !Sub 'arn:${AWS::Partition}:securityhub:${AWS::Region}:${AWS::AccountId}:product/*/default'
+
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Ref StateMachineHumanApprovalArn
+            - Effect: Allow
+              Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource:
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NameOfSolution}-LambdaCheckIAMRole:*'
+  
+  LambdaLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties: 
+      LogGroupName: !Sub "/aws/lambda/${NameOfSolution}-LambdaCheckIAMRole"
+      RetentionInDays: 7
+
+Outputs:
+  LambdaAssumeRole:
+    Value: !GetAtt LambdaCheckIAMRoleExecutionRole.Arn

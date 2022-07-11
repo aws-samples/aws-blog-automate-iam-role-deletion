@@ -1,0 +1,96 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "Notify Owner",
+  "States": {
+    "Notify Owner": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "Payload": {
+          "finding.$": "$",
+          "taskToken.$": "$$.Task.Token"
+        },
+        "FunctionName": "${NotifyOwnerVar}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 300,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "Approve",
+      "ResultPath": null
+    },
+    "Approve": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "Payload": {
+          "finding.$": "$"
+        },
+        "FunctionName": "${ApproveVar}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 300,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "Delete Decision"
+    },
+    "Delete Decision": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.roleStatus",
+          "BooleanEquals": true,
+          "Next": "Wait"
+        }
+      ],
+      "Default": "Fail",
+      "InputPath": "$.Payload"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Next": "Validate",
+      "TimestampPath": "$.waitUntil"
+    },
+    "Validate": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "Payload.$": "$",
+        "FunctionName": "${ValidateVar}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 300,
+          "MaxAttempts": 6,
+          "BackoffRate": 2
+        }
+      ],
+      "End": true
+    },
+    "Fail": {
+      "Type": "Fail",
+      "Error": "IAM Role is currently in use"
+    }
+  }
+}

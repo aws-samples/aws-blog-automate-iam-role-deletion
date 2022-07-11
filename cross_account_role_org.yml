@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  LambdaAssumeRole:
+    Type: String
+    Description: Role for cross-account assume role
+
+  OrgPaths: 
+    Type: String
+    Description: Organization ID to scope down permission for cross account role 
+
+  NameOfSolution:
+    Type: String
+    Default: check-unused-IAM-role
+    Description: The name of the solution - used for naming of created resources
+
+Resources:
+  CrossAccountRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Select [1, !Split ["-", !Ref AWS::StackName]]
+      Description: Cross account role for solution checkUnusedIAMRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: 
+                - !Ref LambdaAssumeRole
+                - !Join [ "", [!Select [0, !Split ["/", !Ref LambdaAssumeRole]], "/", !Ref NameOfSolution, "-ApproveFunctionExecutionRole"]]
+                - !Join [ "", [!Select [0, !Split ["/", !Ref LambdaAssumeRole]], "/", !Ref NameOfSolution, "-ValidateFunctionExecutionRole"]]
+            Action:
+              - sts:AssumeRole
+
+      MaxSessionDuration: 3600
+      Policies:
+        - PolicyName: get_all_IAM_roles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - iam:GetRole
+                  - iam:ListInstanceProfilesForRole
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:TagRole
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:DeleteRole
+                  - iam:PutRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:GetRolePolicy
+                Resource: 
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:instance-profile/*"
+              - Effect: Allow
+                Action: 
+                  - "iam:GetAccountAuthorizationDetails"
+                Resource: '*'
+                Condition: 
+                  ForAnyValue:StringLike:
+                    "aws:PrincipalOrgPaths": !Ref OrgPaths
+Outputs:
+  CrossAccountRole:
+    Description: The IAM role allow cross account access for checkUnusedIAMRole Solution
+    Value:
+      Fn::GetAtt:
+        - CrossAccountRole
+        - Arn

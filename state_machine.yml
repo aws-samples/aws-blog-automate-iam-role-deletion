@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS Step Functions owner approval. It sends an email with an HTTP URL for approval."
+Parameters:
+  ApiGatewayInvokeURL:
+    Type: String
+    Description: Endpoint of Private APIGW to capture response from Owner
+
+  MaxDaysForLastUsed: 
+    Description: Checks the number of days allowed for a role to not be used before being non-compliant
+    Type: Number
+    Default: 60
+    MaxValue: 365
+
+  NameOfSolution:
+    Type: String
+    Default: check-unused-IAM-role
+    Description: The name of the solution - used for naming of created resources
+
+  CrossAccountRole: 
+    Type: String
+    Description: Role name for cross account role
+
+  SenderEmail:
+    Type: String
+    Description: Default email address of IT Security Team to notified unused IAM Role if Owner email isn't available from tag
+
+Resources:
+  # Begin state machine that publishes to Lambda and sends an email with the link for approval
+  OnwerApprovalLambdaStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub ${NameOfSolution}OnwerApprovalStateMachine
+      RoleArn: !GetAtt LambdaStateMachineExecutionRole.Arn
+      LoggingConfiguration:  
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt OnwerApprovalLambdaStateMachineLogGroup.Arn
+        IncludeExecutionData: True
+        Level: ALL
+      DefinitionS3Location: ./state_machine_def.json
+      DefinitionSubstitutions:
+        NotifyOwnerVar: !GetAtt NotifyOwnerFunction.Arn
+        DenyVar: !GetAtt DenyFunction.Arn 
+        ApproveVar: !GetAtt ApproveFunction.Arn 
+        ValidateVar: !GetAtt ValidateFunction.Arn
+        MaxDays: !Ref MaxDaysForLastUsed
+
+  OnwerApprovalLambdaStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/states/${NameOfSolution}OnwerApprovalStateMachine"
+      RetentionInDays: 7
+
+  LambdaStateMachineExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${NameOfSolution}StepFunctionInvokeCallbackLambda"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                  - "lambda:ListFunctions"
+                Resource:
+                  - !Sub "${NotifyOwnerFunction.Arn}"
+
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogDelivery"
+                  - "logs:GetLogDelivery"
+                  - "logs:UpdateLogDelivery"
+                  - "logs:DeleteLogDelivery"
+                  - "logs:ListLogDeliveries"
+                  - "logs:PutResourcePolicy"
+                  - "logs:DescribeResourcePolicies"
+                  - "logs:DescribeLogGroups"
+                Resource:
+                  - "*"
+
+  NotifyOwnerFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub "${NameOfSolution}NotifyOwnerFunction"
+      Handler: "notify_owner.lambda_handler"
+      Role: !GetAtt NotifyOwnerExecutionRole.Arn
+      Runtime: "python3.8"
+      Timeout: "300"
+      Environment: 
+        Variables:
+          privateAPIGWEndpoint: !Ref ApiGatewayInvokeURL
+          ITSecTeamEmail: !Sub SenderEmail
+      Code: ./lambda
+
+  NotifyOwnerExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${NameOfSolution}NotifyOwnerCWLogsPolicy"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NameOfSolution}NotifyOwnerFunction:*'
+        - PolicyName: !Sub "${NameOfSolution}NotifyOwnerSESsendmail"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ses:SendEmai"
+                Resource:
+                  - "*" 
+
+  LambdaNotifyOwnerLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties: 
+      LogGroupName: !Sub "/aws/lambda/${NameOfSolution}NotifyOwnerFunction"
+      RetentionInDays: 7
+
+  DenyFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub "${NameOfSolution}DenyFunction"
+      Handler: "deny.lambda_handler"
+      Role: !GetAtt DenyExecutionRole.Arn
+      Runtime: "python3.8"
+      Timeout: "300"
+      Code: ./lambda
+
+  DenyExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${NameOfSolution}DenyCWLogsPolicy"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NameOfSolution}DenyFunction:*'
+  
+  LambdaDenyLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties: 
+      LogGroupName: !Sub "/aws/lambda/${NameOfSolution}DenyFunction"
+      RetentionInDays: 7
+
+  ApproveFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Sub "${NameOfSolution}ApproveFunction"
+      Handler: "approve.lambda_handler"
+      Role: !GetAtt ApproveExecutionRole.Arn
+      Environment:
+        Variables:
+          cross_account_role: !Ref CrossAccountRole
+      Runtime: "python3.8"
+      Timeout: "300"
+      Code: ./lambda
+
+  ApproveExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub '${NameOfSolution}-ApproveFunctionExecutionRole'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${NameOfSolution}ApproveCWLogsPolicy"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NameOfSolution}ApproveFunction:*'
+              - Effect: Allow
+                Action:
+                  - "sts:AssumeRole"
+                Resource: 
+                  - !Sub "arn:aws:iam::*:role/${CrossAccountRole}"
+  
+  LambdaApproveLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties: 
+      LogGroupName: !Sub "/aws/lambda/${NameOfSolution}ApproveFunction"
+      RetentionInDays: 7
+  
+  ValidateFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName:  !Sub "${NameOfSolution}ValidateFunction"
+      Handler: "validate.lambda_handler"
+      Role: !GetAtt ValidateExecutionRole.Arn
+      Runtime: "python3.8"
+      Timeout: "300"
+      Code: ./lambda
+
+  ValidateExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub '${NameOfSolution}-ValidateFunctionExecutionRole'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${NameOfSolution}ValidateCWLogsPolicy"
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: 
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${NameOfSolution}ValidateFunction:*'
+
+              - Effect: Allow
+                Action:
+                  - "sts:AssumeRole"
+                Resource: 
+                  - !Sub "arn:aws:iam::*:role/${CrossAccountRole}"
+                  
+  LambdaValidateLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties: 
+      LogGroupName: !Sub "/aws/lambda/${NameOfSolution}ValidateFunction"
+      RetentionInDays: 7
+# End state machine that publishes to Lambda and sends an email with the link for approval
+Outputs:
+  StateMachineHumanApprovalArn:
+    Value: !Ref OnwerApprovalLambdaStateMachine

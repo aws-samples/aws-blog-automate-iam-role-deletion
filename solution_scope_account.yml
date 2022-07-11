@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Creates solution to check if IAM Roles are not used within allowed time period"
+
+Parameters:
+  AccountId:
+    Description: Required. Provide target accountid when you choose Scope as Account. Otherwise leave as default.
+    Type: String
+    AllowedPattern: ^[0-9]{12}$
+
+  Frequency:
+    Description: How often  (in days) the automation should run. Minimum is 2 days
+    Type: Number
+    Default: 30
+    MinValue: 2
+    MaxValue: 365
+
+  MaxDaysForLastUsed:
+    Description: Checks the number of days allowed for a role to not be used before being non-compliant
+    Type: Number
+    Default: 60
+    MaxValue: 365
+
+  RolePatternAllowedlist:
+    Description: Pipe separated whitelist of role pathnames using simple pathname matching
+    Type: String
+    Default: ''
+    AllowedPattern: '[-a-zA-Z0-9+=,.@_/|*]+|^$'
+
+  ITSecurityEmail:
+    Type: String
+    Description: Default email address to notified unused IAM Role if Owner email isn't available from tag
+
+
+Resources:
+
+  CheckIAMRoleScopeAccount: 
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: check_role_account.yml
+      Parameters:
+        StateMachineHumanApprovalArn: !GetAtt StateMachineStack.Outputs.StateMachineHumanApprovalArn
+        NameOfSolution: !Ref AWS::StackName
+        Frequency: !Ref Frequency
+        MaxDaysForLastUsed: !Ref MaxDaysForLastUsed
+        RolePatternAllowedlist: !Ref RolePatternAllowedlist
+        AccountId: !Ref AccountId
+        CrossAccountRole: !Sub "${AWS::StackName}CrossAccountRole"
+        DefaultEmail: !Ref ITSecurityEmail
+
+  CrossAccountRoleScopeAccount: 
+    Type: AWS::CloudFormation::StackSet
+    Properties:
+      StackSetName: !Sub "${AWS::StackName}CrossAccountRole"
+      Description: Create role in target account for assume role
+      AdministrationRoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/AWSCloudFormationStackSetAdministrationRole" #prerequisites
+      ExecutionRoleName:  AWSCloudFormationStackSetExecutionRole #prerequisites
+      PermissionModel:  SELF_MANAGED
+      Capabilities: 
+        - CAPABILITY_NAMED_IAM
+      TemplateURL: S3_URL_template_cross_account_role.yml #need to be S3 link to the location of this template
+      StackInstancesGroup:
+      - DeploymentTargets:
+          Accounts:
+          - !Ref AccountId
+        Regions:
+          - !Ref "AWS::Region"
+      Parameters:
+        - ParameterKey: LambdaAssumeRole
+          ParameterValue: !GetAtt CheckIAMRoleScopeAccount.Outputs.LambdaAssumeRole
+        - ParameterKey: NameOfSolution
+          ParameterValue: !Ref AWS::StackName
+
+  StateMachineStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: state_machine.yml
+      Parameters:
+        ApiGatewayInvokeURL:  !GetAtt PrivateAPIGW.Outputs.ApiGatewayInvokeURL
+        MaxDaysForLastUsed: !Ref MaxDaysForLastUsed
+        NameOfSolution: !Ref AWS::StackName
+        SenderEmail: !Ref ITSecurityEmail
+        CrossAccountRole: !Sub "${AWS::StackName}CrossAccountRole"
+
+  PrivateAPIGW: 
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: private_api_gw.yml
+      Parameters:
+        NameOfSolution: !Ref AWS::StackName
+
