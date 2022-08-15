@@ -57,7 +57,7 @@ Resources:
       PermissionModel:  SELF_MANAGED
       Capabilities: 
         - CAPABILITY_NAMED_IAM
-      TemplateURL: S3_URL_template_cross_account_role.yml #need to be S3 link to the location of this template
+      TemplateURL: cross_account_role.yml 
       StackInstancesGroup:
       - DeploymentTargets:
           Accounts:
