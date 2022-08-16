@@ -1,5 +1,3 @@
-# How to centralize findings and automate deletion for unused IAM role
-
 Proactively detecting and responding to unused IAM roles will help you prevent unauthorized entities to leverage it to get access to your AWS resources. You can build automation to enforce this process and periodically check IAM resources then take actions to delete unused IAM roles in an AWS Account. This blog post gives an example solution of how you can leverage Tags and AWS Serverless technologies to create such an automation. Follow blog post “How to centralize findings and automate deletion for unused IAM role” for more details.
 
 
@@ -20,67 +18,17 @@ The architecture diagram above demonstrate the automation workflow. There are tw
 * There should be an existing tagging enforcement already applied to IAM Roles. This solution use tag to identify owner email address. 
 * This solution use Amazon SES to send email to IAM Role’s Owner. The sender address will need to be [verified with Amazon SES](https://docs.aws.amazon.com/ses/latest/DeveloperGuide/verify-email-addresses.html). If your account is still in the Amazon SES sandbox, you also need to verify any email addresses that you send emails to.
 
-### Deploy the solution for a target AWS Account using AWS Console
-
-From the home region of your Security Hub in Security account, , deploy this CloudFormation template (link to template solution_scope_account.yml on github)
-![State Machine Workflow](/images/statemachine.png)
-1. On **Specify stack details**,  provide a unique **Stack name**
-2. For **AccountId**, provide the AWS Account Id of target account 
-3. For **Frequency**, specify how often the automation will be triggered (number of days). For example, if you specify 2 days, the automation will be triggered 2 days after this solution is provisioned. To test this solution without waiting for this schedule, scroll down to **“Test this solution”**
-4. For **ITSecurityEmail,** provide default email from IT Security team. If the role doesn’t have Owner tag to find owner, the email notification will be sent to IT security team.
-5. For **MaxDaysForLastUsed**, provide number of days you would like to use as benchmark for checking if IAM roles are used within the period of time
-6. For **RolePatternAllowedList**, provide a specific pattern of role name that you would like to skip for this automation. If you need to specify multiple patterns, you can use the `|` (pipe) character as a delimiter between each pattern
-
-[Image: Screen Shot 2021-12-23 at 10.07.41 AM.png]
-
-
-1. Click Next
-2. Click Next
-3. Under **Review**, make sure all Parameteres in **Step 2: Specify stack details** are correct. Scroll down to **Capabilities**. Check 2 boxes for “**I acknowledge that AWS CloudFormation might create IAM resources with custom names”** and **“I acknowledge that AWS CloudFormation might require the following capability:  CAPABILITY_AUTO_EXPAND”**
-4. Click **Create Stack**
-
-### Deploy the solution for an Organization or Organizational Unit
-
-From the home region of your Security Hub in Security account, , deploy this CloudFormation template (link to template solution_scope_organization.yml on github)
-[Image: image.png]
-
-1. On **Specify stack details**,  provide a unique **Stack name**
-2. For **AccountId**, provide the AWS Account Id of target account 
-3. For **Frequency**, specify how often the automation will be triggered (number of days). For example, if you specify 2 days, the automation will be triggered 2 days after this solution is provisioned. To test this solution without waiting for this schedule, scroll down to **“Test this solution”**
-4. For **ITSecurityEmail,** provide default email from IT Security team. If the role doesn’t have Owner tag to find owner, the email notification will be sent to IT security team.
-5. For **MaxDaysForLastUsed**, provide number of days you would like to use as benchmark for checking if IAM roles are used within the period of time
-6. Provide appropriate parameters for Organization/OU:
-    1. To run this solution for entire Organization: 
-        1. Provide organization root id for **OrgRootId**. The solution need this root id to create [CFN Stackset](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudformation-stackset-deploymenttargets.html) for all accounts in organization
-        2. Leave **OrganizationalUnitId** blank
-        3. Provide organization ID for **OrganizationId**. This parameter is for scoping permission for cross account role created in this solution.
-        4. Choose **Scope** as Organization
-    2. To run this solution for an Organization Unit:
-        1. Leave **OrgRootId** blank
-        2. Provide Organization Unit Id for **OrganizationUnitId**. The solution need this OU id to create [CFN Stackset](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudformation-stackset-deploymenttargets.html) for all accounts in organization.
-        3. Provide organization ID for **OrganizationId**. This parameter is for scoping permission for cross account role created in this solution.
-        4. Choose **Scope** as OrganizationalUnit
-7. For **RolePatternAllowedList**, provide a specific pattern of role name that you would like to skip for this automation. If you need to specify multiple patterns, you can use the `|` (pipe) character as a delimiter between each pattern
-8. Choose appropriate **Scope** : Organization for running this solution against entire Organization, or OrganizationalUnit for running this solution against an OU. Child OU is not supported in this solution.
-9. Click Next
-10. Click Next
-11. Under **Review**, scroll down to **Capabilities**. Check 2 boxes for “**I acknowledge that AWS CloudFormation might create IAM resources with custom names”** and **“I acknowledge that AWS CloudFormation might require the following capability: CAPABILITY_AUTO_EXPAND”**
-12. Click **Create Stack**
-
-[Image: Screen Shot 2021-12-23 at 10.22.01 AM.png]
 
 ### Deploy the solution using AWS CLI
 
 Alternatively, you can run these AWS CLI command to deploy the solution. Start with cloning the git repo. 
 
 ```
-git clone [git repo to be created] .
-cd /solution
+git clone https://github.com/aws-samples/aws-blog-automate-iam-role-deletion 
+cd /aws-blog-automate-iam-role-deletion
 ```
 
 Run [Cloudformation package](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/package.html)to upload templates and Lambda code to your S3 bucket. The S3 bucket needs to be in the same region that you will deploy this solution
-adfaf
-
 
 ```
 #Deploy solution for a single target AWS Account
@@ -160,63 +108,12 @@ RolePatternAllowedlist='ALLOWED PATTERN'
 
 
 
-## Test the solution
-
-Because the solution is triggered by an Event Bridge schedule rule, it does not perform the checks immediately. To test the solution right away after the Cloudformation stacks are successfully created, you can follow these steps below.
-
-
-###  Manually trigger the automation
-
-After CFN stacks are created, go to AWS Lambda to manually trigger a function 
-
-1. If the scope is Account, click on function [Cloudformation stackname]-LambdaCheckIAMRole. Click **Test**, click **New event**, name the event, and copy the json code below. Please make sure to replace the time by current time in UTC Date Time format  “YYYY-MM-DDTHH:MM:SSZ”. Once you’re done, click **Test** button. 
-
-```
-{
-  "time": "2021-12-22T04:36:52Z"
-}
-```
-
-[Image: Screen Shot 2021-12-23 at 11.32.50 AM.png]
-1. If the Scope is Organization/OU, click on function [Cloudformation stackname]-LambdaGetAccounts.  Click **Test**, click **New event**, name the event. Leave everything as default. Once you’re done, click **Test** button.
-
-### Respond to unused IAM Roles
-
-Once you have trigger the Lambda function, the automation will run necessary checks. For each unused IAM role, it will create a Step Functions state machine execution. Go to AWS Step Functions, click on  state machine [Cloudformation stackname]OnwerApprovalStateMachine. Under **Executions** tab, you will see the list of executions in running state following this naming convention: [target-account-id]-[unused IAM role name]-[time the execution created in Unix format]
-[Image: Screen Shot 2021-12-23 at 12.01.21 PM.png][Image: Screen Shot 2021-12-23 at 12.01.21 PM.png]Each execution will send out an email notification to the IAM role owner (if available via tag) or to the email you provided in CFN stack parameter ‘ITSecurityEmail’. The email will look like this:
-[Image: Screen Shot 2021-12-23 at 11.52.33 AM.png]
-
-The **Approve link** and **Deny link** is the link to a private API Endpoint with a parameter taskToken. If you access these link publicly, it don’t work. To test the approval action, you can utilize API Gateway Test feature by following these step:
-
-1. Retrieve taskToken from state machine:
-    1. Click on the execution that has the IAM role name that you want to delete
-    2. Scroll down to **Execution event history**
-    3. Find the item **taskToken** and copy its value to a notepad
-
-[Image: Screen Shot 2021-12-23 at 12.25.31 PM.png]
-
-1. Test approval workflow using API Gateway Test
-    1. Go to API Gateway 
-    2. Click on API that has the name similar to [Cloudformation stackname]-PrivateAPIGW-[unique string]-ApprovalEndpoint
-    3. To test deny action, click **GET** method under **/deny** resource
-    4. To test approve action, click **GET** method under **/approve** resource
-    5. Click on Test
-    6. Under **QuerryString**, type in **taskToken=**, and paste the taskToken you copy from state machine execution.
-    7. Click **Test**
-
-[Image: Screen Shot 2021-12-23 at 12.37.04 PM.png]
-1. Go to the state machine execution. 
-    1. If you deny the role deletion, the execution will immediately stop as ‘Fail’
-    2. If you choose to approve role deletion, the execution will wait at “Wait” task until specified wait time, triggers “Validate” task to do a final validation on the role before deleting it. 
-
-
-
 ## Next step
+Here are a few suggestions that you can take to extend this solution.
 
-We recommend testing this solution extensively to make sure it performs all the necessary checks following guidance from your IT/Security team. Here are a few suggestions that you can take to improve this solution:
-
-* Encrypt SNS message to protect AWS account ID
-* Create connectivity between your internal network and Private API Gateway
-* Adding a mechanism to control access to API Gateway
-* Utilize Step Function state machine for other automation that needs human approval
+•	This solution uses a private API Gateway to handle the approval response from the IAM role owner. You need to establish private connectivity between your internal network and AWS to invoke a private API Gateway. For instructions, see How to invoke a private API.
+•	Add a mechanism to control access to API Gateway by using endpoint policies for interface VPC endpoints.
+•	Archive the Security Hub finding after the IAM role is deleted using the AWS CLI or AWS Console.
+•	Use a Step Functions state machine for other automation that needs human approval.
+•	Add the capability to report on IAM roles that were skipped due to the absence of RoleLastUsed information.
 
