@@ -7,19 +7,43 @@ Proactively detecting and responding to unused IAM roles will help you prevent u
 
 The architecture diagram above demonstrate the automation workflow. There are two option to run this solution: in a single AWS Account belongs to an organization/OU, or in every member accounts belong to an organization or an organization unit.
 
-## Walkthrough: Deploy the solution
+## Option 1: For a standalone account
+Choose this option if you would like to check for unused IAM roles in a single AWS account. This AWS account might or might not belong to an organization or OU. In this blog post, I refer to this account as the standalone account.
+### Prerequisites
+1.	You need an AWS account specifically for security automation. For this blog post, I refer to this account as the standalone Security account. 
+2.	You should deploy the solution to the standalone Security account, which has appropriate admin permission to audit other accounts and manage security automation.
+3.	Because this solution uses AWS CloudFormation StackSets, you need to grant self-managed permissions to create stack sets in standalone accounts. Specifically, you need to establish a trust relationship between the standalone Security account and the standalone account by creating the AWSCloudFormationStackSetAdministrationRole IAM role in the standalone Security account, and the AWSCloudFormationStackSetExecutionRole IAM role in the standalone account.
+4.	You need to have AWS Security Hub enabled in your standalone Security account, and you need to deploy the solution in the same AWS Region as your Security Hub dashboard.
+5.	You need a tagging enforcement in place for IAM roles. This solution uses an IAM tag key Owner to identify the email address of the owner. The value of this tag key should be the email address associated with the owner of the IAM role. If the Owner tag isn’t available, the notification email is sent to the email address that you provided in the parameter ITSecurityEmail when you provisioned the CloudFormation stack.
+6.	This solution uses Amazon Simple Email Service (Amazon SES) to send emails to the owner of the IAM roles. The destination address needs to be verified with Amazon SES.  With Amazon SES, you can verify identity at the individual email address or at the domain level.
 
+An EventBridge rule triggers the AWS Lambda function LambdaCheckIAMRole in the standalone Security account. The LambdaCheckIAMRole function assumes a role in the standalone account. This role is named after the Cloudformation stack name that you specify when you provision the solution. Then LambdaCheckIAMRole calls the IAM API action GetAccountAuthorizationDetails to get the list of IAM roles in the standalone account, and parses the data type RoleLastUsed to retrieve the date, time, and the Region in which the roles were last used. If the last time value is not available, the IAM role is skipped. Based on the CloudFormation parameter MaxDaysForLastUsed that you provide, LambdaCheckIAMRole determines if the last time used is greater than the MaxDaysForLastUsed value. LambdaCheckIAMRole also extracts tags associated with the IAM roles, and retrieves the email address of the IAM role owner from the value of the tag key Owner. If there is no Owner tag, then LambdaCheckIAMRole sends an email to a default email address provided by you from the CloudFormation parameter ITSecurityEmail.
+
+
+## Option 2: For all member accounts that belong to an organization or an OU
+Choose this option if you want to check for unused IAM roles in every member account that belongs to an AWS Organizations organization or OU.
 ### Prerequisites
 
-* You will need to have an AWS Organization organization or a Security account .
-* The solution should be deployed only in a central Security account, in which has appropriate admin permission to audit other accounts, and manage security automation.
-* Since this solution will create CloudFormation StackSet in member accounts of organization/OU that you specify, the Security account will need to have a [Cloudformation delegated admin permission](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-orgs-delegated-admin.html) to create AWS resources in this solution. If you run this solution for a single account, you need to [establish trust relationship](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-prereqs-self-managed.html)between the Security account and target account by creating  AWSCloudFormationStackSetAdministrationRole IAM Role in Security account and  AWSCloudFormationStackSetExecutionRole in target account.
-* This solution uses AWS Security Hub as a central dashboard in Security account that aggregates findings. Security Hub needs to be enable in Security Account. AWS Security Hub provides [predefined response and remediation actions](https://aws.amazon.com/solutions/implementations/aws-security-hub-automated-response-and-remediation/) based on industry compliance standards and best practices for security threats. It currently doesn’t have automation to check for unused IAM Roles. However, this solution can show you how to create custom findings and import to Security Hub.  The solution needs to be deploy in the home region that you use Security Hub dashboard.
-* There should be an existing tagging enforcement already applied to IAM Roles. This solution use tag to identify owner email address. 
-* This solution use Amazon SES to send email to IAM Role’s Owner. The sender address will need to be [verified with Amazon SES](https://docs.aws.amazon.com/ses/latest/DeveloperGuide/verify-email-addresses.html). If your account is still in the Amazon SES sandbox, you also need to verify any email addresses that you send emails to.
+1.	You need to have an AWS Organizations organization with a dedicated Security account that belongs to a Security OU. For this blog post, I refer to this account as the Security account.
+2.	You should deploy the solution to the Security account that has appropriate admin permission to audit other accounts and to manage security automation.
+3.	Because this solution uses CloudFormation StackSets to create stack sets in member accounts of the organization or OU that you specify, the Security account in the Security OU needs to be granted CloudFormation delegated admin permission to create AWS resources in this solution. 
+4.	You need Security Hub enabled in your Security account, and you need to deploy the solution in the same Region as your Security Hub dashboard.
+5.	You need tagging enforcement in place for IAM roles. This solution uses the IAM tag key Owner to identify the owner email address. The value of this tag key should be the email address associated with the owner of the IAM role. If the Owner tag isn’t available, the notification email will be sent to the email address that you provided in the parameter ITSecurityEmail when you provisioned the CloudFormation stack.
+6.	This solution uses Amazon SES to send emails to the owner of the IAM roles. The destination address needs to be verified with Amazon SES. With Amazon SES, you can verify identity at the individual email address or at the domain level.	
 
 
-### Deploy the solution using AWS CLI
+An EventBridge rule triggers the Lambda function LambdaGetAccounts in the Security account to collect the account IDs of member accounts that belong to the organization or OU. LambdaGetAccounts sends those account IDs to an SNS topic. Each account ID invokes the Lambda function LambdaCheckIAMRole once.
+
+Similar to the process for Option 1, LambdaCheckIAMRole in the Security account assumes a role in the member account(s) of the organization or OU, and checks the last time that IAM roles in the account were used. 
+
+In both options, if an IAM role is not currently used, the function LambdaCheckIAMRole generates a Security Hub finding, and performs BatchImportFindings for all findings to Security Hub in the Security account. At the same time, the Lambda function starts an AWS Step Functions state machine execution. Each execution is for an unused IAM role following this naming convention: [target-account-id]-[unused IAM role name]-[time the execution created in Unix format]
+
+You should avoid running this solution against special IAM roles, such as a break-glass role or a disaster recovery role. In the CloudFormation parameter RolePatternAllowedlist, you can provide a list of role name patterns to skip the check.
+
+![image](https://user-images.githubusercontent.com/11528891/184822475-b36e5902-18ea-4c97-b1d7-529adb697b8e.png)
+
+
+## Deploy the solution using AWS CLI
 
 Alternatively, you can run these AWS CLI command to deploy the solution. Start with cloning the git repo. 
 
