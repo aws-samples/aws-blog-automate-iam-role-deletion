@@ -1,5 +1,4 @@
-Proactively detecting and responding to unused IAM roles will help you prevent unauthorized entities to leverage it to get access to your AWS resources. You can build automation to enforce this process and periodically check IAM resources then take actions to delete unused IAM roles in an AWS Account. This blog post gives an example solution of how you can leverage Tags and AWS Serverless technologies to create such an automation. Follow blog post “How to centralize findings and automate deletion for unused IAM role” for more details.
-
+Sample code and CloudFormation template for blog post “How to centralize findings and automate deletion for unused IAM role”. This solution gives an example of how you can leverage Tags and AWS Serverless technology to create automation to detect and remove unused IAM roles in AWS account.
 
 ## **Solution architecture**
 
@@ -7,7 +6,7 @@ Proactively detecting and responding to unused IAM roles will help you prevent u
 
 The architecture diagram above demonstrate the automation workflow. There are two option to run this solution: in a single AWS Account belongs to an organization/OU, or in every member accounts belong to an organization or an organization unit.
 
-## Option 1: For a standalone account
+## Option 1: Deploy this solution for a standalone account
 Choose this option if you would like to check for unused IAM roles in a single AWS account. This AWS account might or might not belong to an organization or OU. In this blog post, I refer to this account as the standalone account.
 ### Prerequisites
 1.	You need an AWS account specifically for security automation. For this blog post, I refer to this account as the standalone Security account. 
@@ -19,8 +18,7 @@ Choose this option if you would like to check for unused IAM roles in a single A
 
 An EventBridge rule triggers the AWS Lambda function LambdaCheckIAMRole in the standalone Security account. The LambdaCheckIAMRole function assumes a role in the standalone account. This role is named after the Cloudformation stack name that you specify when you provision the solution. Then LambdaCheckIAMRole calls the IAM API action GetAccountAuthorizationDetails to get the list of IAM roles in the standalone account, and parses the data type RoleLastUsed to retrieve the date, time, and the Region in which the roles were last used. If the last time value is not available, the IAM role is skipped. Based on the CloudFormation parameter MaxDaysForLastUsed that you provide, LambdaCheckIAMRole determines if the last time used is greater than the MaxDaysForLastUsed value. LambdaCheckIAMRole also extracts tags associated with the IAM roles, and retrieves the email address of the IAM role owner from the value of the tag key Owner. If there is no Owner tag, then LambdaCheckIAMRole sends an email to a default email address provided by you from the CloudFormation parameter ITSecurityEmail.
 
-
-## Option 2: For all member accounts that belong to an organization or an OU
+## Option 2: Deploy this solution for all member accounts that belong to an organization or an OU
 Choose this option if you want to check for unused IAM roles in every member account that belongs to an AWS Organizations organization or OU.
 ### Prerequisites
 
@@ -40,10 +38,19 @@ In both options, if an IAM role is not currently used, the function LambdaCheckI
 
 You should avoid running this solution against special IAM roles, such as a break-glass role or a disaster recovery role. In the CloudFormation parameter RolePatternAllowedlist, you can provide a list of role name patterns to skip the check.
 
-![image](https://user-images.githubusercontent.com/11528891/184822475-b36e5902-18ea-4c97-b1d7-529adb697b8e.png)
+## **Use a Step Functions state machine to process approval**
+ 
+![Owner approval state machine workflow](/images/statemachine.png)
 
+After the solution identifies an unused IAM role, it creates a Step Functions state machine execution. Figure 2 demonstrates the workflow of the execution. After the execution starts, the first Lambda task NotifyOwner (powered by the Lambda function NotifyOwnerFunction) sends an email to notify the IAM role owner. This is a callback task that pauses the execution until a taskToken is returned. The maximum pause for a callback task is 1 year. The execution waits until the owner responds with a decision to delete or keep the role, which is captured by a private API endpoint in Amazon API Gateway. You can configure a timeout to avoid waiting for callback task execution.
 
-## Deploy the solution using AWS CLI
+With a private API endpoint, you can build a REST API that is only accessible within your Amazon Virtual Private Cloud (Amazon VPC), or within your internal network connected to your VPC. Using a private API endpoint will prevent anyone from outside of your internal network from selecting this link and deleting the role. You can implement authentication and authorization with API Gateway to make sure that only the appropriate owner can delete a role.
+
+If the owner denies role deletion, then the role remains intact until the next automation cycle runs, and the state machine execution stops immediately with a Fail status. If the owner approves role deletion, the next Lambda task Approve (powered by the function ApproveFunction) checks again if the role is not currently used. If the role isn’t in use, the Lambda task Approve attaches an IAM policy DenyAllCheckUnusedIAMRoleSolution to deny the role to perform any actions, and waits for 30 days. During this wait time, you can restore the IAM role by removing the IAM policy DenyAllCheckUnusedIAMRoleSolution from the role. The Step Functions state machine execution for this role is still in progress until the wait time expires.
+
+After the wait time expires, the state machine execution invokes the Validate task. The Lambda function ValidateFunction checks again if the role is not in use after the amount of time calculated by adding MaxDaysForLastUsed and the preceding wait time. It also checks if the IAM policy DenyAllCheckUnusedIAMRoleSolution is attached to the role. If both of these conditions are true, the Lambda function follows a process to detach the IAM policies and delete the role permanently. The role can’t be recovered after deletion.
+
+## To deploy the solution using AWS CLI
 
 Alternatively, you can run these AWS CLI command to deploy the solution. Start with cloning the git repo. 
 
@@ -129,8 +136,6 @@ Frequency=[days] MaxDaysForLastUsed=[days] \
 ITSecurityEmail='security-team@example.com' \
 RolePatternAllowedlist='ALLOWED PATTERN'
 ```
-
-
 
 ## Next step
 Here are a few suggestions that you can take to extend this solution.
