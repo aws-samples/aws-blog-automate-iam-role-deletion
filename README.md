@@ -140,9 +140,9 @@ RolePatternAllowedlist='ALLOWED PATTERN'
 ## Next step
 Here are a few suggestions that you can take to extend this solution.
 
-•	This solution uses a private API Gateway to handle the approval response from the IAM role owner. You need to establish private connectivity between your internal network and AWS to invoke a private API Gateway. For instructions, see How to invoke a private API.
-•	Add a mechanism to control access to API Gateway by using endpoint policies for interface VPC endpoints.
-•	Archive the Security Hub finding after the IAM role is deleted using the AWS CLI or AWS Console.
-•	Use a Step Functions state machine for other automation that needs human approval.
-•	Add the capability to report on IAM roles that were skipped due to the absence of RoleLastUsed information.
+*	This solution uses a private API Gateway to handle the approval response from the IAM role owner. You need to establish private connectivity between your internal network and AWS to invoke a private API Gateway. For instructions, see How to invoke a private API.
+*	Add a mechanism to control access to API Gateway by using endpoint policies for interface VPC endpoints.
+*	Archive the Security Hub finding after the IAM role is deleted using the AWS CLI or AWS Console.
+*	Use a Step Functions state machine for other automation that needs human approval.
+*	Add the capability to report on IAM roles that were skipped due to the absence of RoleLastUsed information.
 
