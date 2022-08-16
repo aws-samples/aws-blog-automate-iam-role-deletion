@@ -101,7 +101,7 @@ Resources:
       Capabilities: 
         - CAPABILITY_NAMED_IAM
       CallAs:  DELEGATED_ADMIN #Security Account must be registered as a delegated admin in the Organization master account
-      TemplateURL: S3_URL_template_cross_account_role_org.yml #need to be S3 link to the location of this template
+      TemplateURL: https://awsiammedia.s3.amazonaws.com/public/sample/1157-how-to-centralize-findings-automate-deletion/cross_account_role_org.yml 
       StackInstancesGroup: 
         - Regions: 
             - !Ref "AWS::Region"
@@ -129,7 +129,7 @@ Resources:
       CallAs:  DELEGATED_ADMIN #Security Account must be registered as a delegated admin in the Organization master account
       Capabilities: 
         - CAPABILITY_NAMED_IAM
-      TemplateURL: S3_URL_template_cross_account_role_org.yml #need to be S3 link to the location of this template
+      TemplateURL: https://awsiammedia.s3.amazonaws.com/public/sample/1157-how-to-centralize-findings-automate-deletion/cross_account_role_org.yml 
       StackInstancesGroup: 
         - Regions: 
             - !Ref "AWS::Region"
