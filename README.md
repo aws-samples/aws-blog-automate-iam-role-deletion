@@ -1,14 +1,17 @@
-Sample code and CloudFormation template for blog post “How to centralize findings and automate deletion for unused IAM role”. This solution gives an example of how you can leverage Tags and AWS Serverless technology to create automation to detect and remove unused IAM roles in AWS account.
+Sample code and CloudFormation template for blog post “How to centralize findings and automate deletion for unused IAM role”. This solution gives an example of how you can leverage Tags and AWS Serverless technologies to detect and remove unused IAM roles in AWS account.
 
 ## **Solution architecture**
 
 ![Architecture Diagram](/images/checkUnusedIAMRoleSolution.png)
 
-The architecture diagram above demonstrate the automation workflow. There are two option to run this solution: in a single AWS Account belongs to an organization/OU, or in every member accounts belong to an organization or an organization unit.
+The architecture diagram above demonstrates the automation workflow. There are two options to run this solution: single standalone AWS Account, or for member accounts belong to an AWS Organization organization or organization unit (OU).
 
-## Option 1: Deploy this solution for a standalone account
+## Option 1: For a standalone account
+
 Choose this option if you would like to check for unused IAM roles in a single AWS account. This AWS account might or might not belong to an organization or OU. In this blog post, I refer to this account as the standalone account.
+
 ### Prerequisites
+
 1.	You need an AWS account specifically for security automation. For this blog post, I refer to this account as the standalone Security account. 
 2.	You should deploy the solution to the standalone Security account, which has appropriate admin permission to audit other accounts and manage security automation.
 3.	Because this solution uses AWS CloudFormation StackSets, you need to grant self-managed permissions to create stack sets in standalone accounts. Specifically, you need to establish a trust relationship between the standalone Security account and the standalone account by creating the AWSCloudFormationStackSetAdministrationRole IAM role in the standalone Security account, and the AWSCloudFormationStackSetExecutionRole IAM role in the standalone account.
@@ -18,8 +21,9 @@ Choose this option if you would like to check for unused IAM roles in a single A
 
 An EventBridge rule triggers the AWS Lambda function LambdaCheckIAMRole in the standalone Security account. The LambdaCheckIAMRole function assumes a role in the standalone account. This role is named after the Cloudformation stack name that you specify when you provision the solution. Then LambdaCheckIAMRole calls the IAM API action GetAccountAuthorizationDetails to get the list of IAM roles in the standalone account, and parses the data type RoleLastUsed to retrieve the date, time, and the Region in which the roles were last used. If the last time value is not available, the IAM role is skipped. Based on the CloudFormation parameter MaxDaysForLastUsed that you provide, LambdaCheckIAMRole determines if the last time used is greater than the MaxDaysForLastUsed value. LambdaCheckIAMRole also extracts tags associated with the IAM roles, and retrieves the email address of the IAM role owner from the value of the tag key Owner. If there is no Owner tag, then LambdaCheckIAMRole sends an email to a default email address provided by you from the CloudFormation parameter ITSecurityEmail.
 
-## Option 2: Deploy this solution for all member accounts that belong to an organization or an OU
-Choose this option if you want to check for unused IAM roles in every member account that belongs to an AWS Organizations organization or OU.
+## Option 2: For all member accounts that belong to an organization or an OU
+Choose this option if you want to check for unused IAM roles in member account that belongs to an AWS Organizations organization or OU.
+
 ### Prerequisites
 
 1.	You need to have an AWS Organizations organization with a dedicated Security account that belongs to a Security OU. For this blog post, I refer to this account as the Security account.
@@ -29,7 +33,6 @@ Choose this option if you want to check for unused IAM roles in every member acc
 5.	You need tagging enforcement in place for IAM roles. This solution uses the IAM tag key Owner to identify the owner email address. The value of this tag key should be the email address associated with the owner of the IAM role. If the Owner tag isn’t available, the notification email will be sent to the email address that you provided in the parameter ITSecurityEmail when you provisioned the CloudFormation stack.
 6.	This solution uses Amazon SES to send emails to the owner of the IAM roles. The destination address needs to be verified with Amazon SES. With Amazon SES, you can verify identity at the individual email address or at the domain level.	
 
-
 An EventBridge rule triggers the Lambda function LambdaGetAccounts in the Security account to collect the account IDs of member accounts that belong to the organization or OU. LambdaGetAccounts sends those account IDs to an SNS topic. Each account ID invokes the Lambda function LambdaCheckIAMRole once.
 
 Similar to the process for Option 1, LambdaCheckIAMRole in the Security account assumes a role in the member account(s) of the organization or OU, and checks the last time that IAM roles in the account were used. 
@@ -38,7 +41,7 @@ In both options, if an IAM role is not currently used, the function LambdaCheckI
 
 You should avoid running this solution against special IAM roles, such as a break-glass role or a disaster recovery role. In the CloudFormation parameter RolePatternAllowedlist, you can provide a list of role name patterns to skip the check.
 
-## **Use a Step Functions state machine to process approval**
+## Use a Step Functions state machine to process approval
  
 ![Owner approval state machine workflow](/images/statemachine.png)
 
@@ -59,7 +62,7 @@ git clone https://github.com/aws-samples/aws-blog-automate-iam-role-deletion
 cd /aws-blog-automate-iam-role-deletion
 ```
 
-Run [Cloudformation package](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/package.html)to upload templates and Lambda code to your S3 bucket. The S3 bucket needs to be in the same region that you will deploy this solution
+Run [Cloudformation package](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/package.html) to upload templates and Lambda code to your S3 bucket. The S3 bucket needs to be in the same region that you will deploy this solution
 
 ```
 #Deploy solution for a single target AWS Account
@@ -140,7 +143,7 @@ RolePatternAllowedlist='ALLOWED PATTERN'
 ## Next step
 Here are a few suggestions that you can take to extend this solution.
 
-*	This solution uses a private API Gateway to handle the approval response from the IAM role owner. You need to establish private connectivity between your internal network and AWS to invoke a private API Gateway. For instructions, see How to invoke a private API.
+*	This solution uses a private API Gateway to handle the approval response from the IAM role owner. You need to establish private connectivity between your internal network and AWS to invoke a private API Gateway. For instructions, see [How to invoke a private API](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-private-api-test-invoke-url.html).
 *	Add a mechanism to control access to API Gateway by using endpoint policies for interface VPC endpoints.
 *	Archive the Security Hub finding after the IAM role is deleted using the AWS CLI or AWS Console.
 *	Use a Step Functions state machine for other automation that needs human approval.
