@@ -96,7 +96,7 @@ Resources:
       Environment: 
         Variables:
           privateAPIGWEndpoint: !Ref ApiGatewayInvokeURL
-          ITSecTeamEmail: !Sub SenderEmail
+          ITSecTeamEmail: !Sub ${SenderEmail}
       Code: ./lambda
 
   NotifyOwnerExecutionRole:
@@ -123,7 +123,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - "ses:SendEmai"
+                  - "ses:SendEmail"
                 Resource:
                   - "*" 
 
